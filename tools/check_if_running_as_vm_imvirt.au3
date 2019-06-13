@@ -18,6 +18,23 @@ Opt("MustDeclareVars", 1)
 
 Local $running_in_vm = False
 
+; I did not find a way to execute Facter from AutoIt.
+Func run_facter($facts="")
+    Local $args_string = "./run_facter."
+    If IsArray($facts) Then
+        $args_string &= "#" & _ArrayToString($facts, '#')
+    EndIf
+    Local $args = StringSplit($args_string, '#', $STR_NOCOUNT)
+    _ArrayDisplay($args)
+    print($args_string)
+    Local $encoded_json = subprocess_check_output($args, True)
+
+    Return Json_Decode($encoded_json)
+EndFunc
+
+; If FileExists("c:/Program Files/Puppet Labs/Puppet/bin/facter.bat") Then
+; print(run_facter(StringSplit("virtual", ' ', $STR_NOCOUNT)))
+
 Local $oWMIService = ObjGet('winmgmts:{impersonationLevel = impersonate}!\\' & '.' & '\root\cimv2')
 Local $oColItems = $oWMIService.ExecQuery('select Manufacturer,Model from win32_computersystem', 'WQL', 0x30)
 If IsObj($oColItems) Then
@@ -32,6 +49,7 @@ If IsObj($oColItems) Then
 
     Next
 EndIf
+
 
 If $running_in_vm Then
     print("Running as guest on a Hypervisor. We took the blue pill and are inside the matrix.")

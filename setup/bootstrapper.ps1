@@ -1,6 +1,22 @@
 ## It is called M$ Shell!
 $host.ui.RawUI.WindowTitle = "M$ Shell"
 
+function Assert-ChocoLastExitCodeIsOK {
+    # As of chocolatey 0.9.10, non-zero success exit codes can be returned
+    # See https://github.com/chocolatey/choco/issues/512#issuecomment-214284461
+    $successexitcodes = (0, 1605, 1614, 1641, 3010)
+
+    if ($LastExitCode -notin $SuccessExitCodes) {
+        throw "Choco command did not exit successfully. Exiting the script."
+    }
+}
+
+function Assert-LastExitCodeIsZero {
+    if ($LastExitCode -ne 0) {
+        throw "Last command did not exit successfully. Exiting the script."
+    }
+}
+
 function Get-Boxstarter {
     Param(
         [string] $Version = "2.10.3",
@@ -54,12 +70,31 @@ function Get-Boxstarter {
         Write-Host $Message
         # Read-Host $Message
     }
-    cd PSScriptRoot
+    cd $PSScriptRoot
+    $ErrorActionPreference = "Stop"
 
+    ## /SChannel is considered unstable.
     cinst -y git.install --params "/GitAndUnixToolsOnPath"
+    Assert-ChocoLastExitCodeIsOK
+
+    ## On Windows 7 and Windows 10, the install script for git seems not to be able to setup the PATH correctly.
+    ## Note that this task is a configuration management task. This script will add the value multiple times. We don’t care.
+    ## Edit: Only reinstall for git helped. This is a confirmed issue. Uninstall git with choco and run the script again when that happens.
+    ## Automated uninstall and install does not work.
+    # cuninst -y git.install
+    # cinst -y git.install --params "/GitAndUnixToolsOnPath"
+    # setx PATH "$env:path;C:/Program Files/Git/cmd;C:/Program Files/Git/mingw64/bin;C:/Program Files/Git/usr/bin" -m
 
     ## Hard dependencies:
-    cinst -y git vim autoit python python2 python3 conemu clink openssl.light autologon
+    cinst -y git vim autoit python python2 python3 conemu clink openssl.light autologon puppet-agent
+    Assert-ChocoLastExitCodeIsOK
+
+    ## Ref: https://stackoverflow.com/questions/46758437/how-to-refresh-the-environment-of-a-powershell-session-after-a-chocolatey-instal/46760714#46760714
+    $env:ChocolateyInstall = Convert-Path "$((Get-Command choco).path)/../.."
+    Import-Module "$env:ChocolateyInstall/helpers/chocolateyProfile.psm1"
+    refreshenv
+
+    ## puppet-agent is only installed to get facter.
 
     ## Not supported for python2 package. This is not an issue, Python2 is not going to be updated soon anyway.
     ## cinst -y python2 --params "/InstallDir:c:/Python2/"
@@ -67,19 +102,38 @@ function Get-Boxstarter {
     # cinst -y python2
     # cinst -y python3 --params "/InstallDir:c:/Python3/"
 
+    ## On Windows 10, the install script for python seems not to be able to setup the PATH correctly anymore.
+    ## Later it worked on a new Windows 10 VM again so we drop the workaround again.
+    # setx PATH "$env:path;C:/Python27" -m
+
     ## On Windows 7, the install script for OpenSSL seems not to be able to setup the PATH correctly.
-    setx PATH "$env:path;C:/Program Files/OpenSSL/bin" -m
+    # setx PATH "$env:path;C:/Program Files/OpenSSL/bin" -m
 
     ## Note: SikuliX is provided as part of the e2e-tests code base currently because the choco package of it is not up-to-date.
     ## Also, we might need more current/nightly versions of SikuliX.
 
-    ## Soft dependencies, nice to have for development and debugging:
-    cinst -y ag obs-studio smplayer sqlitebrowser autohotkey imageglass kitty treesizefree regjump sudo
-
     ## Soft dependencies. Provides additional functionally like Logstash output and `env.uptime`.
     c:/python27/scripts/pip2.exe install python-logstash-async simplejson pathlib2 uptime psutil backports.functools_lru_cache
+    Assert-LastExitCodeIsZero
+
+    ## Soft dependencies. Nice to have for development and debugging:
+    cinst -y ag obs-studio smplayer sqlitebrowser autohotkey imageglass kitty treesizefree regjump sudo openssh
+    Assert-ChocoLastExitCodeIsOK
+
+    ## Don't install Wireshark by default: wireshark winpcap
 
     c:/python37/scripts/pip3.exe install wmi
+    Assert-LastExitCodeIsZero
+
+    # & "C:/Program Files/Git/git-bash.exe" -c "./setup_ssh_known_hosts.sh"
+
+    ## Update this clone statement with the appropriate repo.
+    git clone --recursive 'https://github.com/geberit/e2e-tests.git' c:/e2e-tests
+
+    git -C 'c:/e2e-tests' checkout master
+    Assert-LastExitCodeIsZero
+
+    mkdir -f "c:/var/lib/e2e-tests" > $null
 
     $RegPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
     New-Item -Path $RegPath -ErrorAction SilentlyContinue

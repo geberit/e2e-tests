@@ -156,7 +156,7 @@ EndFunc
 
 
 Func get_filename_save_cur_timestamp()
-    Return @YEAR & "-" & @MON & "-" & @MDAY & "_" & @HOUR & "_" & @MIN & "_" & @SEC & "_" & @MSEC
+    Return StringRegExpReplace(get_current_datetime_as_rfc_3339_string(), "[:. ]", "_")
 EndFunc
 
 
@@ -207,8 +207,35 @@ Func get_working_path()
 EndFunc
 
 
+Func get_config_file_path($_try=0)
+    Local $config_path = 'c:/e2e-tests/config'
+    If $_try = 1 Then
+        $config_path = @ScriptDir & '/config'
+    ElseIf $_try = 2 Then
+        $config_path = @ScriptDir & '/../config'
+    EndIf
+
+    Local $config_file_path = $config_path & '/default.ini'
+
+    If Not FileExists($config_file_path) Then
+        $config_file_path = $config_path & '/monitoring_xxx.ini'
+
+        If Not FileExists($config_file_path) Then
+            If $_try = 3 Then
+                raise(FileNotFoundError, _
+                    "Configuration file not found. Please refer to ./docs/README.md for how to provide it.")
+            Else
+                $config_file_path = get_config_file_path($_try + 1)
+            EndIf
+        EndIf
+    EndIf
+
+    Return get_clean_path($config_file_path)
+EndFunc
+
+
 Func get_screenshot_path()
-    Local Const $screenshot_path = get_working_path() & "/screenshots"
+    Local Const $screenshot_path = get_working_path() & "/screenshots/" & @YEAR & "/" & @MON & "/" & @MDAY
 
     os_makedirs($screenshot_path)
 
@@ -341,6 +368,15 @@ Func get_windows_path($path)
 EndFunc
 
 
+Func get_clean_path($path)
+    Local $path_components = _PathSplit($path, null, null, null, null)
+
+    $path_components[$PATH_DIRECTORY] = StringReplace($path_components[$PATH_DIRECTORY], "\", "/")
+
+    Return _PathMake($path_components[1], $path_components[2], $path_components[3], $path_components[4])
+EndFunc
+
+
 Func store_log_event($level, $msg, $extra)
     Local $meta = ObjCreate("Scripting.Dictionary")
     $meta.Item('test') = get_script_name()
@@ -383,7 +419,7 @@ Func get_prefixed_dict($dict, $prefix)
     Local $data = ObjCreate("Scripting.Dictionary")
 
     For $key In $dict
-       $data.Item($prefix & "-" & $key) = $dict.Item($key)
+       $data.Item($prefix & $key) = $dict.Item($key)
     Next
 
     Return $data
@@ -704,4 +740,17 @@ Func ensure_screen_resolution_is_active($screen_width, $screen_height)
             " This did not succeed.")
     EndIf
    EndIf
+EndFunc
+
+
+Func cleanup_old_var_files()
+   ;; Cleanup screenshots and logs older than 45 days.
+   RunWait('forfiles /P "C:\var\lib\e2e-tests\screenshots" /S /M *.* /D -45 /C "cmd /c del @path"')
+   RunWait('forfiles /P "C:\var\log\e2e-tests" /S /M *.* /D -45 /C "cmd /c del @path"')
+EndFunc
+
+
+Func check_and_ensure_probe_is_setup_correctly()
+    write_login_credentials_from_registry_to_file()
+    ensure_screen_resolution_is_active(1280, 1024)
 EndFunc

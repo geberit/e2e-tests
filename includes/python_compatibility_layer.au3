@@ -160,6 +160,11 @@ Func OSError($self, $strerror)
 EndFunc
 
 
+Func FileNotFoundError($self, $strerror)
+    OSError($self, $strerror)
+EndFunc
+
+
 Func DependencyNotFoundError($self, $strerror)
     Exception($self, $strerror)
 EndFunc

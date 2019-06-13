@@ -28,7 +28,7 @@ import datetime
 
 try:
     import json
-except:
+except ImportError:
     import simplejson as json
 
 try:
@@ -49,7 +49,7 @@ except ImportError:
 
 try:
     import uptime
-except:
+except ImportError:
     pass
 
 
@@ -72,6 +72,27 @@ def check_output(*popenargs, **kwargs):
         error.output = output
         raise error
     return output
+
+
+def check_stderr_output(*popenargs, **kwargs):
+    r"""
+    Run command with arguments and return its stderr as a byte string.
+    >>> check_stderr_output(['/usr/bin/python', '--invalid-switch'])
+    Unknown option: --
+    usage: python [option] ... [-c cmd | -m mod | file | -] [arg] ...
+    Try `python -h' for more information.
+    """
+    process = subprocess.Popen(stderr=subprocess.PIPE, *popenargs, **kwargs)
+    output, stderr = process.communicate()
+    retcode = process.poll()
+    if retcode:
+        cmd = kwargs.get("args")
+        if cmd is None:
+            cmd = popenargs[0]
+        error = subprocess.CalledProcessError(retcode, cmd)
+        error.output = output
+        raise error
+    return stderr
 
 
 def get_java_version():
@@ -138,7 +159,12 @@ def merge(a, b, path=None):
 
 
 def get_filename_save_cur_timestamp():
+    """ tzlocal nor pytz work on Windows. Retry with Python3 only ref: https://stackoverflow.com/a/27987813"""
     return str(datetime.datetime.now().isoformat()).replace(":", "_").replace(".", "_")
+
+
+def get_script_path():
+    return os.path.abspath(os.path.dirname(sys.argv[0]))
 
 
 def get_script_name():
@@ -169,8 +195,31 @@ def get_working_path():
     return working_path
 
 
+def get_config_file_path(_try=0):
+    config_path = 'c:/e2e-tests/config'
+
+    if _try == 1:
+        config_path = get_script_path() + '/config'
+    elif _try == 2:
+        config_path = get_script_path() + '/../config'
+
+    config_file_path = config_path + '/default.ini'
+
+    if not os.path.exists(config_file_path):
+        config_file_path = config_path + '/monitoring_xxx.ini'
+
+        if not os.path.exists(config_file_path):
+            if _try == 3:
+                raise FileNotFoundError(
+                    "Configuration file not found. Please refer to ./docs/README.md for how to provide it.")
+            else:
+                config_file_path = get_config_file_path(_try + 1)
+
+    return config_file_path
+
+
 def get_screenshot_path():
-    screenshot_path = get_working_path() + '/screenshots'
+    screenshot_path = get_working_path() + '/screenshots/' + datetime.datetime.now().strftime('%Y/%m/%d')
     if not os.path.exists(screenshot_path):
         os.makedirs(screenshot_path)
 
@@ -375,6 +424,19 @@ def store_log_event(level, msg, extra=None):
     spool_fh.close()
 
 
+def get_log_structured_data(log_structured_data=None):
+    if log_structured_data is None:
+        log_structured_data = {}
+
+    required_log_structured_data = {
+        '#pre_filters': ['python-logging'],
+        '#source': 'e2e-tests',
+        '#index_category': 'log',
+    }
+    log_structured_data.update(required_log_structured_data)
+    return log_structured_data
+
+
 def process_log_events():
     config = get_config()
     logger = get_logger(config)
@@ -392,13 +454,16 @@ def process_log_events():
         #  print(spool_file)
         spool_fh = open(spool_file, 'r')
         # with open(spool_file, 'r') as spool_fh:
-        spool_obj = json.load(spool_fh)
-        spool_obj['extra'] = get_log_metadata(spool_obj['extra'], config)
-        print(spool_obj)
-        log_function_map[spool_obj['level']](
-            spool_obj['msg'],
-            extra=spool_obj['extra'],
-        )
+        try:
+            spool_obj = json.load(spool_fh)
+            spool_obj['extra'] = get_log_metadata(spool_obj['extra'], config)
+            print(spool_obj)
+            log_function_map[spool_obj['level']](
+                spool_obj['msg'],
+                extra=spool_obj['extra'],
+            )
+        except ValueError:
+            print("Deleting invalid file: " + spool_file)
         spool_fh.close()
         os.unlink(spool_file)
 
@@ -435,7 +500,7 @@ def scp_log_events():
         ], stdout=subprocess.PIPE)
 
 
-def get_config(config_file='./perf.ini'):
+def get_config():
     config_file = ConfigParser(defaults={
         'syslog': 'False',
         'csv': 'False',
@@ -443,7 +508,7 @@ def get_config(config_file='./perf.ini'):
         'managed_network': 'True',
         'managed_software': 'True',
     })
-    config_file.read('./perf.ini')
+    config_file.read(get_config_file_path())
 
     return config_file
 
@@ -473,7 +538,25 @@ def run_check_if_process_is_running_cached(exe):
     return run_check_if_process_is_running(exe)
 
 
+FACTER_FILE_PATH = 'c:/Program Files/Puppet Labs/Puppet/bin/facter.bat'
+
+
+def is_facter_installed():
+    return os.path.exists(FACTER_FILE_PATH)
+
+
+def facter(facts=[]):
+    encoded_json = check_output([FACTER_FILE_PATH, '--json'] + facts)
+
+    return json.loads(encoded_json)
+
+
 def run_check_if_running_as_vm_imvirt():
+    # Issue with Facter 3.12.1 on Windows, Not using it yet, ref: ../tools/check_if_running_as_vm_imvirt.au3
+    # if is_facter_installed():
+    #    return bool(facter(['is_virtual'])['is_virtual'])
+
+    # Fallback in case Facter is not installed.
     return not subprocess.call([
         'c:/Program Files (x86)/AutoIt3/autoit3.exe',
         '/AutoIt3ExecuteScript',

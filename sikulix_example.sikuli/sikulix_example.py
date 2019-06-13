@@ -20,9 +20,9 @@ import sys
 import traceback
 import logging
 
-if "c:\python27\lib\site-packages" not in sys.path:
-    sys.path.append("c:\python27\lib\site-packages")
-sys.path.append('c:\python27\lib')
+if "c:/python27/lib/site-packages" not in sys.path:
+    sys.path.append("c:/python27/lib/site-packages")
+sys.path.append('c:/python27/lib')
 
 sys.path.append(os.sep.join([os.path.dirname(getBundlePath()), "includes"]))
 
@@ -65,11 +65,11 @@ def run_process_x(iteration_count, recursion_depth=0):
     process_time = 0
 
     # click()
-
+    
     start_subprocess_time = sikulix_common.start_time_measurement()
     # wait()
     sleep(1)
-
+    
     response_time = sikulix_common.stop_time_measurement(start_subprocess_time)
     process_time += response_time
     save_metric("e2e-sikulix_example-x-01-load_form_XX-response_time", response_time, iteration_count)
@@ -114,9 +114,22 @@ def main():
             if supported_process_name not in enabled_process_names:
                 continue
 
+            reason_for_failure = None
             try:
                 logger.info("Run " + supported_process_name + ".")
-                supported_process(iteration_count)
+                try:
+                    supported_process(iteration_count)
+                except:
+                    # Try to detect the root cause and include it in the exception.
+                    if exists("common error image", 5):
+                        reason_for_failure = 'Our common error occurred.'
+                    else:
+                        raise
+
+                    if reason_for_failure:
+                        exc_class, exc, tb = sys.exc_info()
+                        new_exc = Exception("%s Actual exception: %s (%s)" % (reason_for_failure, exc, exc_class))
+                        raise new_exc.__class__, new_exc, tb
                 logger.info(supported_process_name + " completed successfully.")
 
             # FindFailed does not inherit from Exception!!!
@@ -129,9 +142,17 @@ def main():
                 exceptions.append(traceback.format_exc().strip())
 
                 exception_short_tmp = []
-                for x in traceback.extract_tb(sys.exc_info()[2]):
-                    if not x[3].startswith("supported_process"):
-                        exception_short_tmp.append(str(x[1]) + ': ' + str(x[2]) + ': ' + str(x[3]))
+                for tb in traceback.extract_tb(sys.exc_info()[2]):
+                    if not tb[3].startswith("supported_process"):
+                        tb_line = str(tb[1]) + ': ' + str(tb[2]) + ': ' + str(tb[3])
+                        # try:
+                            # Does not work.
+                            # tb_line += ': ' + str(tb[4])
+                        # except IndexError: pass
+
+                        exception_short_tmp.append(tb_line)
+                if reason_for_failure:
+                    exception_short_tmp[-1] += ': ' + reason_for_failure
                 exception_short.append('\n'.join(exception_short_tmp))
 
                 try:
